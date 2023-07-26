@@ -31,27 +31,31 @@ public class MyBot : IChessBot
         return Analyze(board, timer, true, 0, 5, timer.MillisecondsRemaining / 40, out moveRating);
     }
 
-    private Move? Analyze(Board board, Timer timer, bool myTurn, int deapth, int deapthLimit, int processingTimeMS, out double moveRating, out bool whiteWins, out bool blackWins)
+    private Move Analyze(Board board, Timer timer, bool myTurn, int deapth, int deapthLimit, int processingTimeMS, out double moveRating)
     {
-        // Check deapth limit
-        if(deapth >= deapthLimit)
-        {
-            // Calculate the score of the board as is (This is the rating for the move that got us here)
-            moveRating = CalculateBoardScore(board, myTurn);
-            return null;
-        }
-
         // Get the list of legal moves
         Move[] moves = board.GetLegalMoves();
         Dictionary<Move, double> scores = new();
+
+        // Check deapth limit
+        if(deapth >= deapthLimit || moves.Length <= 0)
+        {
+            // Calculate the score of the board as is (This is the rating for the move that got us here)
+            moveRating = CalculateBoardScore(board);
+            return new Move("b1c3", board);
+        }
 
         // Rate each legal move
         foreach(Move move in moves)
         {
             board.MakeMove(move);
             double subRating;
-            bool blackWon, whiteWon;
-            Analyze(board, timer, !myTurn, deapth+1, deapthLimit, int processingTimeMs / moves.Length, out subRating, out whiteWon, out blackWon); // We already know which move was analized, so we don't care about the returned move
+            if(myTurn && board.IsInCheckmate()) // This move just won me the game, set points to 10000
+                {moveRating = 10000; board.UndoMove(move); return move;}
+            else if(!myTurn && board.IsInCheckmate()) // This move just won the opponent the game, set points to -10000
+                {moveRating = -10000; board.UndoMove(move); return move;}
+            else    // Nobody wins immediatly, so analize the board
+                Analyze(board, timer, !myTurn, deapth+1, deapthLimit, processingTimeMS / moves.Length, out subRating); // We already know which move was analized, so we don't care about the returned move
             scores.Add(move, subRating);
             board.UndoMove(move);
         }
@@ -78,30 +82,52 @@ public class MyBot : IChessBot
     {
         // Calculate the raw peice strength on the board
         StrategyScores whiteScores, blackScores, relativeScores = new();
-        PieceList[] pieces = board.GetAllPieceLists();
+        PieceList[] pieceLists = board.GetAllPieceLists();
+
+        // Very inefficient transformation
+        List<Piece> pieces = new();
+        foreach (PieceList pList in pieceLists)
+        {
+            foreach (Piece p in pList)
+            {
+                pieces.Add(p);
+            }
+        }
 
         // Total strength
-        relativeScores.pieceStrength = CalculateTotalPieceStrength(pieces, out blackScores.pieceStrength, out whiteScores.pieceStrength);
+        relativeScores.pieceStrength = CalculatePieceStrength(pieces, 0, 7, 0, 7, out blackScores.pieceStrength, out whiteScores.pieceStrength);
 
         // Flanks
-        // Find all the peices in collumns A-C
-s
-        return relativeScores.TotalScore();
+        relativeScores.leftFlank = CalculatePieceStrength(pieces, 0, 7, 0, 2, out blackScores.leftFlank, out whiteScores.leftFlank);
+        relativeScores.center = CalculatePieceStrength(pieces, 0, 7, 3, 4, out blackScores.center, out whiteScores.center);
+        relativeScores.rightFlank = CalculatePieceStrength(pieces, 0, 7, 5, 7, out blackScores.rightFlank, out whiteScores.rightFlank);
+
+        // Sides
+        relativeScores.leftSide = CalculatePieceStrength(pieces, 0, 7, 0, 3, out blackScores.leftSide, out whiteScores.leftSide);
+        relativeScores.rightSide = CalculatePieceStrength(pieces, 0, 7, 4, 7, out blackScores.rightSide, out whiteScores.rightSide);
+
+
+        double finalScore = relativeScores.pieceStrength +
+            relativeScores.center;
+        return finalScore;
     }
 
-    private double CalculateTotalPieceStrength(PieceList[] pieces, out double black, out double white)
+    private double CalculatePieceStrength(List<Piece> pieces, int minRank, int maxRank, int minFile, int maxFile, out double black, out double white)
     {
         black = 0.0;
         white = 0.0;
-        foreach(PieceList plist in pieces)
+        foreach(Piece piece in pieces)
         {
-            if(plist.IsWhitePieceList)
+            Square sq = piece.Square;
+            if(sq.Rank < minRank || sq.Rank > maxRank || sq.File < minFile || sq.File > maxFile) continue; // Skip if out of bounds
+
+            if(piece.IsWhite)
             {
-                white += plist.Count * pieceValues[plist.TypeOfPieceInList];
+                white += pieceValues[piece.PieceType];
             }
             else
             {
-                black += plist.Count * pieceValues[plist.TypeOfPieceInList];
+                black += pieceValues[piece.PieceType];
             }
         }
 
@@ -118,6 +144,8 @@ s
         public int pawnCount = 0;
         public bool kingInCenter = true;
         public double kingSafety = 0;
+        public double attackRating = 0;
+        public double defenseRating = 0;
         public int space = 0; // How many squares are held by the pawn wall
 
         //                                                       _              _
@@ -169,11 +197,6 @@ s
         // 2 sector advancement concentrations
         public double whiteBase = 0;
         public double blackBase = 0;
-
-        public readonly double TotalScore()
-        {
-            return pieceStrength;
-        }
     }
 
 }
