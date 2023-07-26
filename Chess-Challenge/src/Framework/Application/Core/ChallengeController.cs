@@ -219,6 +219,7 @@ namespace ChessChallenge.Application
 
             using StreamReader reader = new(path);
             string txt = reader.ReadToEnd();
+            //reader.Close();
             return TokenCounter.CountTokens(txt);
         }
 

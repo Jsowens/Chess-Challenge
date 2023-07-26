@@ -8,10 +8,8 @@ using System.Diagnostics;
 
 public class MyBot : IChessBot
 {
-    private readonly ILogger<MyBot> logger;
-
-    private int myColor = -1; // -1: unknown, 0: black, 1: white
-
+    private bool isWhite = true;
+    private bool firstMove = true;
     private Dictionary<PieceType,double> pieceValues = new() {
             {PieceType.None, 0.0},
             {PieceType.Pawn, 1.0},
@@ -22,47 +20,58 @@ public class MyBot : IChessBot
             {PieceType.King, 0}
         };
 
+    private List<Move> predictions = new();
+
     public Move Think(Board board, Timer timer)
     {
-        // if necessary determine color
-        if(myColor == -1)
-            myColor = board.IsWhiteToMove ? 1 : 0;
+        if(firstMove)
+            isWhite = board.IsWhiteToMove;
+        predictions.Clear();
+        double moveRating;
+        return Analyze(board, timer, true, 0, 5, timer.MillisecondsRemaining / 40, out moveRating);
+    }
 
-        // Determine who's turn it is
-        bool myTurn = myColor == (board.IsWhiteToMove ? 1 : 0);
+    private Move? Analyze(Board board, Timer timer, bool myTurn, int deapth, int deapthLimit, int processingTimeMS, out double moveRating, out bool whiteWins, out bool blackWins)
+    {
+        // Check deapth limit
+        if(deapth >= deapthLimit)
+        {
+            // Calculate the score of the board as is (This is the rating for the move that got us here)
+            moveRating = CalculateBoardScore(board, myTurn);
+            return null;
+        }
 
-        // Get moves
+        // Get the list of legal moves
         Move[] moves = board.GetLegalMoves();
-        Dictionary<Move, double> allMoves = new();
-        Dictionary<Move,double> checks = new();
-        Dictionary<Move, double> captures = new();
-        Dictionary<Move, double> promotions = new();
-        Dictionary<Move, double> attacks = new();
-        Dictionary<Move, double> other = new();
+        Dictionary<Move, double> scores = new();
 
-        // Calculate board score
-        double boardScore = CalculateBoardScore(board);
-
-        // Sort moves
-        foreach (Move move in moves)
+        // Rate each legal move
+        foreach(Move move in moves)
         {
             board.MakeMove(move);
-            double subScore = CalculateBoardScore(board);
-            allMoves.Add(move, subScore);
-
-            logger.LogInformation(AppLogEvents.Read, "Move ({0}->{1}) score = {2}", move.StartSquare.Name, move.TargetSquare.Name, subScore);
-
-            if(board.IsInCheck()) checks.Add(move, subScore);
-            else if(move.IsCapture || move.IsEnPassant) captures.Add(move, subScore);
-            else if(move.IsPromotion) promotions.Add(move, subScore);
-            else other.Add(move, subScore);
+            double subRating;
+            bool blackWon, whiteWon;
+            Analyze(board, timer, !myTurn, deapth+1, deapthLimit, int processingTimeMs / moves.Length, out subRating, out whiteWon, out blackWon); // We already know which move was analized, so we don't care about the returned move
+            scores.Add(move, subRating);
             board.UndoMove(move);
         }
 
-        // Pick best move
-        var sortedMoves = from entry in allMoves orderby entry.Value descending select entry.Key;
-
-        return sortedMoves.First<Move>();
+        // Determine the best move
+        Move bestMove;
+        if(myTurn)
+        {
+            // I want the most positive score
+            var sortedMoves = from entry in scores orderby entry.Value descending select entry.Key;
+            bestMove = sortedMoves.First<Move>();
+        }
+        else
+        {
+            // My opponent wants the most negative score
+            var sortedMoves = from entry in scores orderby entry.Value ascending select entry.Key;
+            bestMove = sortedMoves.First<Move>();
+        }
+        moveRating = scores[bestMove];
+        return bestMove; // This doesn't really matter until the top layer resolves
     }
 
     private double CalculateBoardScore(Board board)
@@ -76,8 +85,7 @@ public class MyBot : IChessBot
 
         // Flanks
         // Find all the peices in collumns A-C
-        
-        
+s
         return relativeScores.TotalScore();
     }
 
@@ -97,7 +105,7 @@ public class MyBot : IChessBot
             }
         }
 
-        return myColor == 0 ? black - white : white - black; // Positive number: I'm stronger, Negative number: I'm weaker
+        return isWhite ? white - black : black - white; // Positive number: I'm stronger, Negative number: I'm weaker
     }
 
     struct StrategyScores
