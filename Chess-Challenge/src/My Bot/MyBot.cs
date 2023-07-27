@@ -37,6 +37,8 @@ public class MyBot : IChessBot
         Move[] moves = board.GetLegalMoves();
         Dictionary<Move, double> scores = new();
 
+        // Console.WriteLine(string.Format("Computation Layer: {0}/{1}\tMy Turn: {2}\tNumber of Available Moves: {3}", deapth, deapthLimit, myTurn, moves.Length));
+
         // Check deapth limit
         if(deapth >= deapthLimit || moves.Length <= 0)
         {
@@ -45,20 +47,95 @@ public class MyBot : IChessBot
             return new Move("b1c3", board);
         }
 
-        // Rate each legal move
+        // Prescan every legal move and sort into move types
+        Dictionary<Move, double>[] movesByType = new Dictionary<Move, double>[]
+        {
+            new(), // Checks
+            new(), // Captures
+            new(), // Other
+        };
+
         foreach(Move move in moves)
         {
+            // Make the move
             board.MakeMove(move);
-            double subRating;
-            if(myTurn && board.IsInCheckmate()) // This move just won me the game, set points to 10000
-                {moveRating = 10000; board.UndoMove(move); return move;}
-            else if(!myTurn && board.IsInCheckmate()) // This move just won the opponent the game, set points to -10000
-                {moveRating = -10000; board.UndoMove(move); return move;}
-            else    // Nobody wins immediatly, so analize the board
-                Analyze(board, timer, !myTurn, deapth+1, deapthLimit, processingTimeMS / moves.Length, out subRating); // We already know which move was analized, so we don't care about the returned move
-            scores.Add(move, subRating);
+
+            // Rate the position
+            double moveScore = CalculateBoardScore(board);
+
+            // Determine move type
+            if(board.IsInCheckmate())
+            {
+                // This is the best move becaues it's checkmate
+                moveRating = myTurn ? 10000 : -10000;
+                board.UndoMove(move);
+                return move;
+            }
+            else if(board.IsInCheck())
+            {
+                // This is a check, add and it's score to the check list
+                movesByType[0].Add(move, moveScore);
+            }
+            else if(move.IsCapture)
+            {
+                // This is a capture, add and it's score to the capture list
+                movesByType[1].Add(move, moveScore);
+            }
+            else
+            {
+                // Any other move, add and it's score to the other list
+                movesByType[2].Add(move, moveScore);
+            }
             board.UndoMove(move);
         }
+
+        // Console.WriteLine(string.Format("# Checks found: {0}\t# of Captures found: {1}\t # of Other found: {2}", movesByType[0].Count, movesByType[1].Count,movesByType[2].Count));
+
+        IEnumerable<Move>?[] sortedMovesByType = new IEnumerable<Move>[movesByType.Length];
+
+        if(myTurn)
+        {
+            sortedMovesByType[0] = from entry in movesByType[0] orderby entry.Value descending select entry.Key;
+            sortedMovesByType[1] = from entry in movesByType[1] orderby entry.Value descending select entry.Key;
+            sortedMovesByType[2] = from entry in movesByType[2] orderby entry.Value descending select entry.Key;
+        }
+        else
+        {
+            sortedMovesByType[0] = from entry in movesByType[0] orderby entry.Value ascending select entry.Key;
+            sortedMovesByType[1] = from entry in movesByType[1] orderby entry.Value ascending select entry.Key;
+            sortedMovesByType[2] = from entry in movesByType[2] orderby entry.Value ascending select entry.Key;
+        }
+
+        // Rate the top moves
+        foreach(IEnumerable<Move>? sortedMoves in sortedMovesByType)
+        {
+            if(sortedMoves == null) continue;
+            int count = 0;
+            foreach(Move move in sortedMoves)
+            {
+                // Console.WriteLine(string.Format("Analizing move {0}/{1} of current set...", count, deapthLimit));
+                if(count > deapthLimit) continue;
+                board.MakeMove(move);
+                Analyze(board, timer, !myTurn, deapth + 1, deapthLimit, processingTimeMS / deapthLimit * movesByType.Length, out double subRating);
+                scores.Add(move,subRating);
+                board.UndoMove(move);
+                count++;
+            }
+        }
+
+        // foreach(Move move in moves)
+        // {
+        //     board.MakeMove(move);
+        //     double subRating;
+        //     if(myTurn && board.IsInCheckmate()) // This move just won me the game, set points to 10000
+        //         {moveRating = 10000; board.UndoMove(move); return move;}
+        //     else if(!myTurn && board.IsInCheckmate()) // This move just won the opponent the game, set points to -10000
+        //         {moveRating = -10000; board.UndoMove(move); return move;}
+        //     else    // Nobody wins immediatly, so analize the board
+        //         Analyze(board, timer, !myTurn, deapth+1, deapthLimit, processingTimeMS / moves.Length, out subRating); // We already know which move was analized, so we don't care about the returned move
+        //     scores.Add(move, subRating);
+        //     board.UndoMove(move);
+        // }
 
         // Determine the best move
         Move bestMove;
